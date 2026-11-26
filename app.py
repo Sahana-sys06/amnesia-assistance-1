@@ -63,7 +63,6 @@ with st.sidebar:
     st.caption("A gentle daily support dashboard")
     page=st.radio("Go to",["Today","People & camera","Manage reminders","Hardware & voice","Caregiver notes"],label_visibility="visible")
     st.divider()
-    st.caption("Local prototype · Face data stays in this project folder. Do not upload dataset/ or model/ to GitHub.")
 
 if page=="Today":
     st.title("Good morning, Margaret")
@@ -98,7 +97,9 @@ elif page=="People & camera":
         name=st.text_input("Person’s name or family label",placeholder="For example: Anna")
         role=st.text_input("Relationship",placeholder="For example: Daughter")
         consent=st.checkbox("I have permission to capture and save this person’s face samples.")
-        sample=st.camera_input("Take a face sample",key="sample_camera",resolution="720p")
+        sample_camera=st.camera_input("Take a face sample",key="sample_camera",resolution="720p")
+        sample_file=st.file_uploader("Or upload a photo if the camera preview is blank",type=["jpg","jpeg","png"],key="sample_file")
+        sample=sample_camera if sample_camera is not None else sample_file
         if st.button("Save this sample",type="primary",disabled=not(sample and name.strip() and consent)):
             try:
                 saved=collect_sample(sample.getvalue(),DATASET,safe_label(name))
@@ -113,7 +114,9 @@ elif page=="People & camera":
                 count,people=train_recognizer(DATASET,MODEL_DIR)
                 st.success(f"Trained on {count} samples for {people} label(s).")
             except ValueError as exc: st.error(str(exc))
-        check=st.camera_input("Take a photo to check",key="check_camera",resolution="720p")
+        check_camera=st.camera_input("Take a photo to check",key="check_camera",resolution="720p")
+        check_file=st.file_uploader("Or upload a photo to check",type=["jpg","jpeg","png"],key="check_file")
+        check=check_camera if check_camera is not None else check_file
         threshold=st.slider("Matching strictness (prototype distance cutoff)",20,100,55,help="This is not a confidence percentage. Lower is stricter; uncertain results should remain Unknown.")
         if st.button("Check this photo",disabled=check is None,use_container_width=True):
             try:
@@ -123,7 +126,6 @@ elif page=="People & camera":
                     for name_found,distance in result: st.warning(f"Possible match: {name_found} · distance {distance:.1f}. Please confirm; this is not proof of identity.")
                 else: st.info("No face was recognized. Treat this as Unknown.")
             except ValueError as exc: st.error(str(exc))
-        st.warning("The in-page camera check takes a photo. Live video opens in a separate local window. Camera recognition does not trigger emergency actions.")
 
 elif page=="Manage reminders":
     st.title("Manage reminders")
@@ -209,16 +211,12 @@ elif page=="Hardware & voice":
         responses=read_lines(st.session_state.esp32_serial)
         if responses: st.info(" · ".join(responses))
         else: st.caption("No button response received yet.")
-    st.warning("The ESP32 must be connected by USB to the same laptop running this local app. Streamlit Cloud cannot access your laptop’s USB port. Voice and face recognition are not emergency services.")
 
 else:
     st.title("Caregiver notes")
     st.markdown('<div class="hero"><div class="eyebrow">For family and care teams</div><div class="hero-title">A shared routine, with consent.</div><div class="hero-copy">Use clear reminders and agreed check-ins. Limit who can access personal details and face samples.</div></div>',unsafe_allow_html=True)
-    st.info("This prototype stores reminders in reminders.json and face samples/model files in local folders. It does not send caregiver alerts, call emergency contacts, or provide medical advice. The local Hardware & voice page can send reminders over USB serial and answer a few spoken commands.")
-    st.warning("Face images are sensitive. Keep this folder private, get informed permission, and delete samples when they’re no longer needed. The recognition model can make mistakes and is not clinically validated.")
 
 st.divider()
-st.caption("Amnesia Assistance · Local educational prototype · Not a medical device")
 
 
 
