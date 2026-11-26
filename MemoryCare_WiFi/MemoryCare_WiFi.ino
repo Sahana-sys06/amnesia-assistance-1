@@ -9,11 +9,10 @@
 
 // OLED: SDA -> GPIO 21, SCL -> GPIO 22; button between GPIO 18 and GND.
 // Button is active-low and uses the ESP32's internal pull-up.
-// Optional alerts: LED (with series resistor) -> GPIO 25; buzzer SIG -> GPIO 26.
+// Optional buzzer alert: SIG -> GPIO 26; VCC -> 3V3; GND -> GND.
 constexpr int OLED_WIDTH = 128;
 constexpr int OLED_HEIGHT = 64;
 constexpr int BUTTON_PIN = 18;
-constexpr int LED_PIN = 25;
 constexpr int BUZZER_PIN = 26;
 constexpr uint8_t OLED_ADDRESS = 0x3C;
 constexpr unsigned long DEBOUNCE_MS = 50;
@@ -40,7 +39,6 @@ unsigned long reminderAlertStartedAt = 0;
 
 void stopReminderAlert() {
   noTone(BUZZER_PIN);
-  digitalWrite(LED_PIN, LOW);
   reminderAlertActive = false;
   buzzerOn = false;
 }
@@ -60,14 +58,13 @@ void updateReminderAlert() {
     return;
   }
 
-  // Three short beeps and flashes, 800 ms apart.
+  // Three short beeps, 800 ms apart.
   const bool shouldBeOn = (elapsed % 800) < 250;
   if (shouldBeOn != buzzerOn) {
     if (shouldBeOn) tone(BUZZER_PIN, 2000);
     else noTone(BUZZER_PIN);
     buzzerOn = shouldBeOn;
   }
-  digitalWrite(LED_PIN, shouldBeOn ? HIGH : LOW);
 }
 
 String cleanText(String value, int limit = 18) {
@@ -177,9 +174,7 @@ void connectToWifi() {
 
 void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
   noTone(BUZZER_PIN);
   Serial.begin(115200);
   Serial.setTimeout(30);
