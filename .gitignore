@@ -1,0 +1,13 @@
+__pycache__/
+.venv/
+venv/
+.streamlit/secrets.toml
+# Face samples and trained weights are sensitive local data; never commit them.
+dataset/*
+!dataset/.gitkeep
+model/*
+!model/.gitkeep
+reminders.json
+
+# Private ESP32 Wi-Fi settings
+MemoryCare_WiFi/secrets.h
