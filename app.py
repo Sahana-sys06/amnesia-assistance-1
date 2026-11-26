@@ -4,7 +4,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import cv2
@@ -12,7 +12,6 @@ import numpy as np
 import streamlit as st
 import streamlit.components.v1 as components
 from voice_input import voice_commands
-from hardware import available_ports, connect as connect_esp32, send_line, read_lines
 
 from face_tools import collect_sample, detect_faces, load_recognizer, train_recognizer, recognize_image
 
@@ -56,6 +55,112 @@ def save_reminders(items):
 
 def safe_label(text):
     return re.sub(r"[^A-Za-z0-9_-]+","_",text.strip()).strip("_")[:48]
+
+
+def esp32_time(value):
+    """Convert dashboard times such as '9:00 AM' to the sketch's HH:MM format."""
+    for pattern in ("%I:%M %p", "%H:%M"):
+        try:
+            return datetime.strptime(value.strip(), pattern).strftime("%H:%M")
+        except ValueError:
+            continue
+    return ""
+
+
+def render_browser_esp32(reminders):
+    """Render a browser-side Web Serial bridge so Streamlit Cloud never handles USB data."""
+    safe_reminders = [
+        {"title": str(item.get("title", "Reminder"))[:80], "time": str(item.get("time", ""))[:40]}
+        for item in reminders
+    ]
+    reminder_json = json.dumps(safe_reminders).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    html = r'''<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{font:15px Arial,sans-serif;color:#263b36;margin:0;padding:8px;background:#fffefa}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}.field{flex:1;min-width:180px}
+label{display:block;font-weight:600;margin-bottom:5px}input,select{box-sizing:border-box;width:100%;padding:10px;border:1px solid #dfe6db;border-radius:10px;background:white;color:#263b36}
+button{padding:11px 16px;border:1px solid #dfe6db;border-radius:10px;background:#fffefa;color:#355f4f;font-weight:700;cursor:pointer}
+button.primary{background:#355f4f;color:white;border-color:#355f4f}button:disabled{opacity:.48;cursor:not-allowed}
+#status{padding:12px;margin:10px 0;background:#edf3e9;border-radius:10px;font-weight:600;min-height:18px}
+.hint{color:#61736b;font-size:13px;line-height:1.45}
+</style></head><body>
+<div class="hint">Connect from this browser to the ESP32’s USB serial port. Press Connect and choose “Silicon Labs CP210x USB to UART Bridge (COM3)” in Edge’s device picker. Arduino Serial Monitor must be closed.</div>
+<div class="row"><div class="field"><label for="person">Person shown on OLED</label><input id="person" value="Margaret" maxlength="48"></div><div class="field"><label for="relation">Relationship</label><input id="relation" value="Patient" maxlength="48"></div></div>
+<div class="row"><div class="field"><label for="reminder">Reminder to show</label><select id="reminder"></select></div></div>
+<div class="row"><button id="connect" class="primary">Connect ESP32</button><button id="disconnect" disabled>Disconnect</button><button id="send" disabled>Send reminder to OLED</button></div>
+<div id="status" role="status" aria-live="polite">Ready. No device selected.</div>
+<div class="hint">The browser sends reminder details directly over USB; the Streamlit server does not receive serial data. The OLED shows the reminder title (up to 18 characters) and time. Press the ESP32 button to see its acknowledgement here.</div>
+<script>
+const reminders = __REMINDER_JSON__;
+const $ = id => document.getElementById(id);
+const statusBox = $('status');
+const choice = $('reminder');
+for (const item of reminders) { const option=document.createElement('option'); option.value=String(reminders.indexOf(item)); option.textContent=`${item.time} · ${item.title}`; choice.appendChild(option); }
+let port=null, reader=null, reading=false, doseId=Math.floor(Date.now()/1000);
+function status(message){statusBox.textContent=message;}
+function buttons(){ $('connect').disabled=!!port; $('disconnect').disabled=!port; $('send').disabled=!port||!reminders.length; }
+function clean(value,limit){return String(value).replace(/[|\r\n]+/g,' ').replace(/\s+/g,' ').trim().slice(0,limit);}
+function hhmm(value){
+  const s=String(value||'').trim();
+  let m=s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if(m){let h=Number(m[1])%12;if(m[3].toUpperCase()==='PM')h+=12;return `${String(h).padStart(2,'0')}:${m[2]}`;}
+  m=s.match(/^(?:[01]\d|2[0-3]):[0-5]\d$/);return m?s:'';
+}
+async function writeLine(line){
+  if(!port||!port.writable)throw new Error('ESP32 is disconnected.');
+  const writer=port.writable.getWriter();
+  try{await writer.write(new TextEncoder().encode(line+'\n'));}finally{writer.releaseLock();}
+}
+async function readLoop(activePort){
+  let buffer='';const decoder=new TextDecoder();reading=true;
+  try{
+    while(port===activePort&&activePort.readable){
+      reader=activePort.readable.getReader();
+      try{
+        while(true){
+          const {value,done}=await reader.read();if(done)break;
+          buffer+=decoder.decode(value,{stream:true});
+          const lines=buffer.split(/\r?\n/);buffer=lines.pop()||'';
+          for(const raw of lines){const line=raw.trim();if(!line)continue;
+            const ack=line.match(/^ACKNOWLEDGED\|(\d+)$/i);
+            if(ack&&Number(ack[1])>0)status(`Button acknowledgement received for reminder ${ack[1]}.`);
+            else if(line.startsWith('INFO|'))status(line.slice(5));
+          }
+        }
+      }finally{reader.releaseLock();reader=null;}
+    }
+  }catch(error){if(port===activePort)status(`Serial read ended: ${error.message}`);}
+  finally{reading=false;}
+}
+$('connect').addEventListener('click',async()=>{
+  if(!('serial' in navigator)){status('Web Serial is unavailable in this browser frame. Open this HTTPS app in desktop Edge or Chrome, or use the local desktop app.');return;}
+  try{
+    status('Choose the ESP32 USB serial device in the browser prompt…');
+    const selected=await navigator.serial.requestPort();await selected.open({baudRate:115200});port=selected;buttons();
+    status('Connected. Waiting for the ESP32 to restart…');readLoop(selected);await new Promise(resolve=>setTimeout(resolve,1200));status('Connected. Select a reminder and press Send reminder to OLED.');
+  }catch(error){port=null;buttons();status(`Could not connect: ${error.message}`);}
+});
+$('disconnect').addEventListener('click',async()=>{
+  const old=port;port=null;buttons();
+  try{if(reader)await reader.cancel();}catch(_){}
+  try{if(old&&old.readable===null)await old.close();else if(old)await old.close();}catch(error){status(`Disconnected: ${error.message}`);return;}
+  status('ESP32 disconnected.');
+});
+$('send').addEventListener('click',async()=>{
+  const person=clean($('person').value,48),relationship=clean($('relation').value,48),item=reminders[Number(choice.value)];
+  if(!person||!relationship){status('Enter the person and relationship shown on the OLED.');return;}
+  if(!item){status('Add a reminder in Manage reminders first.');return;}
+  const title=clean(item.title,18),time=hhmm(item.time);doseId=Math.max(Math.floor(Date.now()/1000),doseId+1);
+  try{await writeLine(`PERSON|${person}|${relationship}`);await writeLine(`MED|${doseId}|${title}|${time}`);status(`Sent “${title}” to the OLED. Press the ESP32 button to acknowledge.`);}
+  catch(error){status(`Could not send reminder: ${error.message}`);}
+});
+if(!window.isSecureContext)status('Web Serial needs a secure HTTPS page. Open the hosted app using its https:// address.');
+if(!('serial' in navigator))status('Web Serial is not available in this embedded browser. Try desktop Edge or Chrome.');
+navigator.serial?.addEventListener('disconnect',event=>{if(port===event.target){port=null;buttons();status('ESP32 USB device disconnected.');}});
+buttons();
+</script></body></html>'''.replace("__REMINDER_JSON__", reminder_json)
+    st.iframe(html, height=390, width="stretch", alt="ESP32 USB serial controls")
+
 
 
 with st.sidebar:
@@ -175,42 +280,8 @@ elif page=="Hardware & voice":
             components.html(f"<script>window.speechSynthesis.cancel();window.speechSynthesis.speak(new SpeechSynthesisUtterance({json.dumps(st.session_state.voice_reply)}));</script>",height=0)
 
     st.divider(); st.subheader("ESP32 and OLED over USB")
-    st.caption("Connect the ESP32 to this laptop with its USB cable. Select the COM port, connect, then send the current reminder. This uses the serial message format in the matching Arduino sketch; no Wi-Fi is needed while USB is connected.")
-    ports=available_ports()
-    labels=[f"{device} — {description}" for device,description in ports]
-    selected=st.selectbox("ESP32 port",labels,placeholder="Connect the ESP32 and refresh this page")
-    if "esp32_serial" not in st.session_state: st.session_state.esp32_serial=None
-    a,b=st.columns(2)
-    with a:
-        if st.button("Connect ESP32",type="primary",disabled=not bool(ports),use_container_width=True):
-            try:
-                conn=st.session_state.esp32_serial
-                if conn and conn.is_open: conn.close()
-                port=ports[labels.index(selected)][0]
-                st.session_state.esp32_serial=connect_esp32(port)
-                send_line(st.session_state.esp32_serial,"PERSON|Margaret|Patient")
-                st.success(f"Connected to {port}; sent the patient label.")
-            except Exception as exc: st.error(f"Could not open the port: {exc}")
-    with b:
-        if st.button("Disconnect",use_container_width=True):
-            conn=st.session_state.get("esp32_serial")
-            if conn and conn.is_open: conn.close()
-            st.session_state.esp32_serial=None
-            st.info("ESP32 disconnected.")
-    current=read_reminders()
-    if current:
-        chosen=st.selectbox("Reminder to show on OLED",current,format_func=lambda item:f"{item['time']} · {item['title']}")
-        if st.button("Send reminder to OLED",disabled=not bool(st.session_state.esp32_serial),use_container_width=True):
-            try:
-                import time
-                dose_id=int(time.time())
-                send_line(st.session_state.esp32_serial,f"MED|{dose_id}|{chosen['title']}|{chosen['time']}")
-                st.success("Reminder sent to the ESP32.")
-            except Exception as exc: st.error(f"Could not send reminder: {exc}")
-    if st.button("Check ESP32 button response",disabled=not bool(st.session_state.esp32_serial)):
-        responses=read_lines(st.session_state.esp32_serial)
-        if responses: st.info(" · ".join(responses))
-        else: st.caption("No button response received yet.")
+    st.caption("Connect your ESP32 by USB, press Connect, and choose its USB device in the browser popup. Close Arduino Serial Monitor first.")
+    render_browser_esp32(read_reminders())
 
 else:
     st.title("Caregiver notes")
