@@ -158,17 +158,25 @@ if page=="Today":
                         match_label = str(matches[0][0])
                         match_meta = read_people().get(match_label, {})
                         display_name = match_meta.get("name", match_label.replace("_", " "))
-                        relationship = match_meta.get("relationship", "Known person")
-                        st.success(f"Possible match: {display_name} · {relationship}. Please confirm.")
-                        if st.session_state.get("live_last_person") != match_label:
+                        relationship = match_meta.get("relationship", "").strip()
+                        if relationship:
+                            st.success(f"Possible match: {display_name} · {relationship}. Please confirm.")
+                        else:
+                            st.warning(f"Possible match: {display_name}. Its relationship is not saved yet. Set it under People & camera → Existing people and OLED labels.")
+                        if relationship and (
+                            st.session_state.get("live_last_person") != match_label
+                            or st.session_state.get("live_last_relationship") != relationship
+                        ):
                             st.session_state.recognized_person_event = {
                                 "id": uuid.uuid4().hex,
                                 "name": display_name,
                                 "relationship": relationship,
                             }
                             st.session_state.live_last_person = match_label
+                            st.session_state.live_last_relationship = relationship
                     else:
                         st.session_state.live_last_person = None
+                        st.session_state.live_last_relationship = None
                         st.caption("No known person recognized in this frame.")
                 except (ValueError, OSError) as exc:
                     st.error(f"Live camera recognition failed: {exc}")
@@ -217,15 +225,19 @@ elif page=="People & camera":
                 st.image(cv2.cvtColor(annotated,cv2.COLOR_BGR2RGB),caption="Check any suggested name with a person or caregiver.")
                 if result:
                     for name_found,distance in result: st.warning(f"Possible match: {name_found} · distance {distance:.1f}. Please confirm; this is not proof of identity.")
-                    # A match is sent only after the user explicitly checks a photo.
                     match_label = str(result[0][0])
                     match_meta = read_people().get(match_label, {})
-                    st.session_state.recognized_person_event = {
-                        "id": uuid.uuid4().hex,
-                        "name": match_meta.get("name", match_label.replace("_", " ")),
-                        "relationship": match_meta.get("relationship", "Known person"),
-                    }
-                    st.info("Possible match queued for the OLED. If it is not connected yet, connect the ESP32 in the sidebar. Please confirm the name.")
+                    match_name = match_meta.get("name", match_label.replace("_", " "))
+                    match_relationship = match_meta.get("relationship", "").strip()
+                    if match_relationship:
+                        st.session_state.recognized_person_event = {
+                            "id": uuid.uuid4().hex,
+                            "name": match_name,
+                            "relationship": match_relationship,
+                        }
+                        st.info(f"Queued {match_name} · {match_relationship} for the OLED. Please confirm the match.")
+                    else:
+                        st.warning(f"The relationship for {match_name} is not saved. Go to Existing people and OLED labels below, enter it, and press Save OLED label. The app will not guess a relationship.")
                 else: st.info("No face was recognized. Treat this as Unknown.")
             except ValueError as exc: st.error(str(exc))
 
