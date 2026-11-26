@@ -9,9 +9,12 @@
 
 // OLED: SDA -> GPIO 21, SCL -> GPIO 22; button between GPIO 18 and GND.
 // Button is active-low and uses the ESP32's internal pull-up.
+// Optional alerts: LED (with series resistor) -> GPIO 25; buzzer SIG -> GPIO 26.
 constexpr int OLED_WIDTH = 128;
 constexpr int OLED_HEIGHT = 64;
 constexpr int BUTTON_PIN = 18;
+constexpr int LED_PIN = 25;
+constexpr int BUZZER_PIN = 26;
 constexpr uint8_t OLED_ADDRESS = 0x3C;
 constexpr unsigned long DEBOUNCE_MS = 50;
 constexpr unsigned long WIFI_RETRY_MS = 10000;
@@ -31,6 +34,41 @@ unsigned long lastDebounceTime = 0;
 unsigned long statusExpiresAt = 0;
 unsigned long lastWifiAttempt = 0;
 bool oledReady = false;
+bool reminderAlertActive = false;
+bool buzzerOn = false;
+unsigned long reminderAlertStartedAt = 0;
+
+void stopReminderAlert() {
+  noTone(BUZZER_PIN);
+  digitalWrite(LED_PIN, LOW);
+  reminderAlertActive = false;
+  buzzerOn = false;
+}
+
+void startReminderAlert() {
+  reminderAlertStartedAt = millis();
+  reminderAlertActive = true;
+  buzzerOn = false;
+}
+
+void updateReminderAlert() {
+  if (!reminderAlertActive) return;
+
+  const unsigned long elapsed = millis() - reminderAlertStartedAt;
+  if (elapsed >= 2400) {
+    stopReminderAlert();
+    return;
+  }
+
+  // Three short beeps and flashes, 800 ms apart.
+  const bool shouldBeOn = (elapsed % 800) < 250;
+  if (shouldBeOn != buzzerOn) {
+    if (shouldBeOn) tone(BUZZER_PIN, 2000);
+    else noTone(BUZZER_PIN);
+    buzzerOn = shouldBeOn;
+  }
+  digitalWrite(LED_PIN, shouldBeOn ? HIGH : LOW);
+}
 
 String cleanText(String value, int limit = 18) {
   value.replace('|', ' ');
@@ -105,6 +143,7 @@ void handleCommand(String line) {
     medicationTime = cleanText(line.substring(third + 1), 5);
     statusMessage = "Reminder active";
     statusExpiresAt = millis() + 2500;
+    startReminderAlert();
     drawScreen();
     return;
   }
@@ -138,6 +177,10 @@ void connectToWifi() {
 
 void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+  noTone(BUZZER_PIN);
   Serial.begin(115200);
   Serial.setTimeout(30);
   Wire.begin(21, 22);
@@ -154,6 +197,8 @@ void setup() {
 }
 
 void loop() {
+  updateReminderAlert();
+
   while (Serial.available()) {
     char incoming = static_cast<char>(Serial.read());
     if (incoming == '\n') {
@@ -173,6 +218,7 @@ void loop() {
   if (millis() - lastDebounceTime > DEBOUNCE_MS && reading != stableButtonState) {
     stableButtonState = reading;
     if (stableButtonState == LOW) {
+      stopReminderAlert();
       if (activeDoseId > 0 && activeDoseId != lastAcknowledgedDoseId) {
         Serial.print("ACKNOWLEDGED|");
         Serial.println(activeDoseId);
@@ -187,5 +233,4 @@ void loop() {
   }
   lastButtonReading = reading;
 }
-
 
