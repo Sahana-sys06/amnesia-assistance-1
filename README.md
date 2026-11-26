@@ -23,7 +23,7 @@ This project combines the Streamlit daily dashboard with the supplied face colle
 - The Hardware & voice page supports browser speech commands and sends reminders to the ESP32 over USB serial.
 - `collect_faces.py` is an optional local live camera collector (SPACE saves a sample, Q quits).
 - `train_model.py` trains an OpenCV LBPH model from the local `dataset/` folders.
-- `recognize_faces.py` opens a separate local live-recognition window; it can also be launched from the dashboard.
+- The dashboard's live recognition uses the browser webcam and checks a frame once per second; `recognize_faces.py` remains an optional local OpenCV tool.
 - `face_tools.py` contains shared local capture/training/recognition helpers.
 - `web_dashboard.py` is a compatibility launcher for the Streamlit app. The previous custom dashboard depended on missing `database/` and `reminders/` modules, so it has been replaced by this unified entry point.
 - `reminders.json` is created locally after reminder changes.
@@ -32,7 +32,6 @@ This project combines the Streamlit daily dashboard with the supplied face colle
 
 Face images and model weights are sensitive. This app stores them locally in `dataset/` and `model/`; those folders are excluded by `.gitignore`. Do not upload participant images or model files to a public repository or Streamlit Cloud. Ask for informed permission before collecting anyone's face. Recognition can be wrong, and the displayed name is only a possible match; it must be confirmed by a person. This is an educational prototype, not a medical device or an emergency service.
 
-The in-page camera check is a still photo, not continuous browser video. Live video uses the separate local OpenCV window. The local app can send reminders to the ESP32/OLED over USB serial and answer a small set of browser speech commands. It does not place calls, send caregiver alerts, or provide medical advice. Streamlit Cloud cannot access your laptop camera or USB hardware as local devices.
-
+Still-photo checks and live browser recognition send captured images to the Streamlit server for matching. Live recognition checks one frame per second while running. Face samples, metadata, and trained model files are runtime data; the Streamlit-hosted filesystem can reset when the app restarts. The browser can connect to local USB serial only when the user grants the browser permission. The app does not place calls, send caregiver alerts, or provide medical advice.
 
 
