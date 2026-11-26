@@ -201,7 +201,7 @@ elif page=="People & camera":
         else: st.caption("Enter the person’s relationship so the OLED can show it after a match.")
     with col2:
         st.markdown('<div class="panel-title">Train and check</div>',unsafe_allow_html=True)
-        st.caption("Training uses the saved face samples on this laptop. More than one varied sample per person is recommended.")
+        st.caption("Training uses saved face samples in this dashboard. More than one varied sample per person is recommended.")
         if st.button("Train face model",use_container_width=True):
             try:
                 count,people=train_recognizer(DATASET,MODEL_DIR)
@@ -228,6 +228,20 @@ elif page=="People & camera":
                     st.info("Possible match queued for the OLED. If it is not connected yet, connect the ESP32 in the sidebar. Please confirm the name.")
                 else: st.info("No face was recognized. Treat this as Unknown.")
             except ValueError as exc: st.error(str(exc))
+
+    saved_people = sorted(path.name for path in DATASET.iterdir() if path.is_dir()) if DATASET.exists() else []
+    if saved_people:
+        st.subheader("Existing people and OLED labels")
+        st.caption("Set or correct each person’s relationship here. This is the relationship sent to the OLED.")
+        saved_metadata = read_people()
+        for label in saved_people:
+            metadata = saved_metadata.get(label, {})
+            with st.form(f"person_metadata_{label}"):
+                display_name = st.text_input("Name shown", value=metadata.get("name", label.replace("_", " ")), key=f"person_name_{label}")
+                relationship = st.text_input("Relationship shown", value=metadata.get("relationship", ""), key=f"person_relationship_{label}")
+                if st.form_submit_button("Save OLED label", disabled=not(display_name.strip() and relationship.strip())):
+                    save_person_metadata(label, display_name, relationship)
+                    st.success(f"Saved {display_name} · {relationship}.")
 
 elif page=="Manage reminders":
     st.title("Manage reminders")
