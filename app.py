@@ -251,9 +251,12 @@ elif page=="People & camera":
             with st.form(f"person_metadata_{label}"):
                 display_name = st.text_input("Name shown", value=metadata.get("name", label.replace("_", " ")), key=f"person_name_{label}")
                 relationship = st.text_input("Relationship shown", value=metadata.get("relationship", ""), key=f"person_relationship_{label}")
-                if st.form_submit_button("Save OLED label", disabled=not(display_name.strip() and relationship.strip())):
-                    save_person_metadata(label, display_name, relationship)
-                    st.success(f"Saved {display_name} · {relationship}.")
+                if st.form_submit_button("Save OLED label"):
+                    if display_name.strip() and relationship.strip():
+                        save_person_metadata(label, display_name, relationship)
+                        st.success(f"Saved {display_name} · {relationship}.")
+                    else:
+                        st.error("Enter both the name and relationship, then save the OLED label.")
 
 elif page=="Manage reminders":
     st.title("Manage reminders")
