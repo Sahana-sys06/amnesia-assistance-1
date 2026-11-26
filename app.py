@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import uuid
+import base64
 from datetime import date, datetime
 from pathlib import Path
 
@@ -20,11 +21,15 @@ ROOT = Path(__file__).resolve().parent
 DATASET = ROOT / "dataset"
 MODEL_DIR = ROOT / "model"
 REMINDERS_FILE = ROOT / "reminders.json"
+PEOPLE_FILE = ROOT / "people.json"
 
 st.set_page_config(page_title="Amnesia Assistance", page_icon="🌿", layout="wide")
 
 _esp32_component = components.declare_component(
     "amnesia_esp32", path=str(ROOT / "esp32_component")
+)
+_live_camera_component = components.declare_component(
+    "amnesia_live_camera", path=str(ROOT / "camera_component")
 )
 
 st.markdown("""
@@ -56,6 +61,22 @@ def read_reminders():
 
 def save_reminders(items):
     REMINDERS_FILE.write_text(json.dumps(items,ensure_ascii=False,indent=2),encoding="utf-8")
+
+
+def read_people():
+    if PEOPLE_FILE.exists():
+        try:
+            people = json.loads(PEOPLE_FILE.read_text(encoding="utf-8"))
+            if isinstance(people, dict): return people
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {}
+
+
+def save_person_metadata(label, name, relationship):
+    people = read_people()
+    people[label] = {"name": name.strip()[:48], "relationship": relationship.strip()[:48]}
+    PEOPLE_FILE.write_text(json.dumps(people, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def safe_label(text):
@@ -116,8 +137,40 @@ if page=="Today":
             model=MODEL_DIR/"lbph_model.yml"
             if not model.exists(): st.warning("Train the model first in People & camera.")
             else:
-                subprocess.Popen([sys.executable,str(ROOT/"recognize_faces.py")],cwd=str(ROOT))
-                st.success("Live recognition opened in a separate window on this laptop.")
+                st.session_state.live_camera_open = True
+                st.rerun()
+        if st.session_state.get("live_camera_open"):
+            st.caption("Allow camera access when the browser asks. Keep this page open for live recognition.")
+            st.caption("Live camera frames are sent to the app server for matching. Use only with the person’s permission.")
+            live_value = _live_camera_component(key="amnesia_live_camera", default=None)
+            frame_data = live_value.get("frame") if isinstance(live_value, dict) else None
+            if frame_data:
+                try:
+                    frame_bytes = base64.b64decode(frame_data.split(",", 1)[-1])
+                    matches, annotated = recognize_image(frame_bytes, MODEL_DIR, 55)
+                    st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Live camera. Confirm any suggested name; matches can be wrong.")
+                    if matches:
+                        match_label = str(matches[0][0])
+                        match_meta = read_people().get(match_label, {})
+                        display_name = match_meta.get("name", match_label.replace("_", " "))
+                        relationship = match_meta.get("relationship", "Known person")
+                        st.success(f"Possible match: {display_name} · {relationship}. Please confirm.")
+                        if st.session_state.get("live_last_person") != match_label:
+                            st.session_state.recognized_person_event = {
+                                "id": uuid.uuid4().hex,
+                                "name": display_name,
+                                "relationship": relationship,
+                            }
+                            st.session_state.live_last_person = match_label
+                    else:
+                        st.session_state.live_last_person = None
+                        st.caption("No known person recognized in this frame.")
+                except (ValueError, OSError) as exc:
+                    st.error(f"Live camera recognition failed: {exc}")
+            if st.button("Close live camera", key="close_live_camera"):
+                st.session_state.live_camera_open = False
+                st.session_state.live_last_person = None
+                st.rerun()
         st.markdown('<div class="panel"><div class="panel-title">Need help?</div><div class="subtle">Call a trusted caregiver using your phone or agreed emergency plan.</div></div>',unsafe_allow_html=True)
 
 elif page=="People & camera":
@@ -132,12 +185,15 @@ elif page=="People & camera":
         sample_camera=st.camera_input("Take a face sample",key="sample_camera",resolution="720p")
         sample_file=st.file_uploader("Or upload a photo if the camera preview is blank",type=["jpg","jpeg","png"],key="sample_file")
         sample=sample_camera if sample_camera is not None else sample_file
-        if st.button("Save this sample",type="primary",disabled=not(sample and name.strip() and consent)):
+        if st.button("Save this sample",type="primary",disabled=not(sample and name.strip() and role.strip() and consent)):
             try:
-                saved=collect_sample(sample.getvalue(),DATASET,safe_label(name))
+                label=safe_label(name)
+                saved=collect_sample(sample.getvalue(),DATASET,label)
+                save_person_metadata(label, name, role)
                 st.success(f"Saved {saved} face sample(s) for {name.strip()}.")
             except ValueError as exc: st.error(str(exc))
-        if role.strip(): st.caption(f"Relationship note: {name.strip()} · {role.strip()} (shown as context; not used by the face model)")
+        if role.strip(): st.caption(f"OLED label: {name.strip()} · {role.strip()} (the relationship is saved with this person)")
+        else: st.caption("Enter the person’s relationship so the OLED can show it after a match.")
     with col2:
         st.markdown('<div class="panel-title">Train and check</div>',unsafe_allow_html=True)
         st.caption("Training uses the saved face samples on this laptop. More than one varied sample per person is recommended.")
@@ -157,9 +213,12 @@ elif page=="People & camera":
                 if result:
                     for name_found,distance in result: st.warning(f"Possible match: {name_found} · distance {distance:.1f}. Please confirm; this is not proof of identity.")
                     # A match is sent only after the user explicitly checks a photo.
+                    match_label = str(result[0][0])
+                    match_meta = read_people().get(match_label, {})
                     st.session_state.recognized_person_event = {
                         "id": uuid.uuid4().hex,
-                        "name": str(result[0][0]).replace("_", " ")[:48],
+                        "name": match_meta.get("name", match_label.replace("_", " ")),
+                        "relationship": match_meta.get("relationship", "Known person"),
                     }
                     st.info("Possible match queued for the OLED. If it is not connected yet, connect the ESP32 in the sidebar. Please confirm the name.")
                 else: st.info("No face was recognized. Treat this as Unknown.")
