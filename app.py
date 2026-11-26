@@ -134,21 +134,26 @@ if page=="Today":
     with right:
         st.markdown('<div class="panel"><div class="panel-title">People you know</div><div class="subtle">Use People & camera to capture a photo or open the live recognition window.</div></div>',unsafe_allow_html=True)
         if st.button("Open live camera recognition",type="primary",use_container_width=True):
-            model=MODEL_DIR/"lbph_model.yml"
-            if not model.exists(): st.warning("Train the model first in People & camera.")
-            else:
-                st.session_state.live_camera_open = True
-                st.rerun()
+            st.session_state.live_camera_open = True
+            st.rerun()
         if st.session_state.get("live_camera_open"):
             st.caption("Allow camera access when the browser asks. Keep this page open for live recognition.")
             st.caption("Live camera frames are sent to the app server for matching. Use only with the person’s permission.")
+            model_ready = (MODEL_DIR / "lbph_model.yml").exists()
+            if not model_ready:
+                st.warning("Camera preview can run now. To recognize people, add face samples with their relationships in People & camera, then train the model.")
             live_value = _live_camera_component(key="amnesia_live_camera", default=None)
             frame_data = live_value.get("frame") if isinstance(live_value, dict) else None
             if frame_data:
                 try:
                     frame_bytes = base64.b64decode(frame_data.split(",", 1)[-1])
-                    matches, annotated = recognize_image(frame_bytes, MODEL_DIR, 55)
-                    st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Live camera. Confirm any suggested name; matches can be wrong.")
+                    if model_ready:
+                        matches, annotated = recognize_image(frame_bytes, MODEL_DIR, 55)
+                    else:
+                        matches=[]
+                        annotated=cv2.imdecode(np.frombuffer(frame_bytes,dtype=np.uint8),cv2.IMREAD_COLOR)
+                    if annotated is not None:
+                        st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Live camera. Confirm any suggested name; matches can be wrong.")
                     if matches:
                         match_label = str(matches[0][0])
                         match_meta = read_people().get(match_label, {})
