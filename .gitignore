@@ -11,3 +11,6 @@ reminders.json
 
 # Private ESP32 Wi-Fi settings
 MemoryCare_WiFi/secrets.h
+
+# Do not upload the ESP32 Wi-Fi password
+MemoryCare_WiFi/secrets.h
