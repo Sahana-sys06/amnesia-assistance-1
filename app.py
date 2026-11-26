@@ -161,7 +161,7 @@ elif page=="People & camera":
                         "id": uuid.uuid4().hex,
                         "name": str(result[0][0]).replace("_", " ")[:48],
                     }
-                    st.info("Sent the possible match to the OLED, if the ESP32 is connected. Please confirm the name.")
+                    st.info("Possible match queued for the OLED. If it is not connected yet, connect the ESP32 in the sidebar. Please confirm the name.")
                 else: st.info("No face was recognized. Treat this as Unknown.")
             except ValueError as exc: st.error(str(exc))
 
