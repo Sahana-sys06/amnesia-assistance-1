@@ -1,11 +1,6 @@
 #include <Wire.h>
-#include <WiFi.h>
-#include "secrets.h"
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
-
-// Enter the name and password of the same 2.4 GHz Wi-Fi network
-// that your laptop is connected to.
 
 // OLED: SDA -> GPIO 21, SCL -> GPIO 22; button between GPIO 18 and GND.
 // Button is active-low and uses the ESP32's internal pull-up.
@@ -16,7 +11,6 @@ constexpr int BUTTON_PIN = 18;
 constexpr int BUZZER_PIN = 26;
 constexpr uint8_t OLED_ADDRESS = 0x3C;
 constexpr unsigned long DEBOUNCE_MS = 50;
-constexpr unsigned long WIFI_RETRY_MS = 10000;
 
 Adafruit_SH1106G display(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
 String personName = "Unknown person";
@@ -31,7 +25,6 @@ int lastButtonReading = HIGH;
 int stableButtonState = HIGH;
 unsigned long lastDebounceTime = 0;
 unsigned long statusExpiresAt = 0;
-unsigned long lastWifiAttempt = 0;
 bool oledReady = false;
 bool reminderAlertActive = false;
 bool buzzerOn = false;
@@ -106,8 +99,6 @@ void drawScreen() {
     display.println(cleanText(statusMessage, 20));
   } else if (activeDoseId > 0) {
     display.println("Press button to ACK");
-  } else if (WiFi.status() == WL_CONNECTED) {
-    display.println("Wi-Fi connected");
   } else {
     display.println("Ready for reminders");
   }
@@ -162,16 +153,6 @@ void handleCommand(String line) {
   }
 }
 
-void connectToWifi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
-  WiFi.begin(WIFI_NAME, WIFI_PASSWORD);
-  lastWifiAttempt = millis();
-  statusMessage = "Connecting to Wi-Fi";
-  statusExpiresAt = millis() + 3000;
-  drawScreen();
-}
-
 void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(BUZZER_PIN, OUTPUT);
@@ -188,7 +169,6 @@ void setup() {
   }
 
   drawScreen();
-  connectToWifi();
 }
 
 void loop() {
@@ -202,10 +182,6 @@ void loop() {
     } else if (incoming != '\r' && serialLine.length() < 160) {
       serialLine += incoming;
     }
-  }
-
-  if (WiFi.status() != WL_CONNECTED && millis() - lastWifiAttempt >= WIFI_RETRY_MS) {
-    connectToWifi();
   }
 
   int reading = digitalRead(BUTTON_PIN);
