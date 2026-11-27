@@ -27,37 +27,15 @@ unsigned long lastDebounceTime = 0;
 unsigned long statusExpiresAt = 0;
 bool oledReady = false;
 bool reminderAlertActive = false;
-bool buzzerOn = false;
-unsigned long reminderAlertStartedAt = 0;
 
 void stopReminderAlert() {
   noTone(BUZZER_PIN);
   reminderAlertActive = false;
-  buzzerOn = false;
 }
 
 void startReminderAlert() {
-  reminderAlertStartedAt = millis();
   reminderAlertActive = true;
-  buzzerOn = false;
-}
-
-void updateReminderAlert() {
-  if (!reminderAlertActive) return;
-
-  const unsigned long elapsed = millis() - reminderAlertStartedAt;
-  if (elapsed >= 2400) {
-    stopReminderAlert();
-    return;
-  }
-
-  // Three short beeps, 800 ms apart.
-  const bool shouldBeOn = (elapsed % 800) < 250;
-  if (shouldBeOn != buzzerOn) {
-    if (shouldBeOn) tone(BUZZER_PIN, 2000);
-    else noTone(BUZZER_PIN);
-    buzzerOn = shouldBeOn;
-  }
+  tone(BUZZER_PIN, 2000);
 }
 
 String cleanText(String value, int limit = 18) {
@@ -119,7 +97,9 @@ void handleCommand(String line) {
     drawScreen();
     return;
   }
-  if (line.startsWith("MED|")) {
+  const bool scheduledReminder = line.startsWith("MED|");
+  const bool displayOnlyReminder = line.startsWith("SHOW|");
+  if (scheduledReminder || displayOnlyReminder) {
     int first = line.indexOf('|');
     int second = line.indexOf('|', first + 1);
     int third = line.indexOf('|', second + 1);
@@ -129,9 +109,9 @@ void handleCommand(String line) {
     activeDoseId = doseId;
     medicationName = cleanText(line.substring(second + 1, third), 18);
     medicationTime = cleanText(line.substring(third + 1), 5);
-    statusMessage = "Reminder active";
+    statusMessage = scheduledReminder ? "Reminder active" : "Reminder shown";
     statusExpiresAt = millis() + 2500;
-    startReminderAlert();
+    if (scheduledReminder) startReminderAlert();
     drawScreen();
     return;
   }
@@ -172,8 +152,6 @@ void setup() {
 }
 
 void loop() {
-  updateReminderAlert();
-
   while (Serial.available()) {
     char incoming = static_cast<char>(Serial.read());
     if (incoming == '\n') {
@@ -193,6 +171,8 @@ void loop() {
       if (activeDoseId > 0 && activeDoseId != lastAcknowledgedDoseId) {
         Serial.print("ACKNOWLEDGED|");
         Serial.println(activeDoseId);
+        lastAcknowledgedDoseId = activeDoseId;
+        activeDoseId = 0;
         statusMessage = "Sent acknowledgment";
       } else {
         Serial.println("ACKNOWLEDGED|0");
