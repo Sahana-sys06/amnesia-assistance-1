@@ -109,7 +109,7 @@ void drawScreen() {
   } else if (WiFi.status() == WL_CONNECTED) {
     display.println("Wi-Fi connected");
   } else {
-    display.println("Connecting to Wi-Fi");
+    display.println("Ready for reminders");
   }
   display.display();
 }
@@ -228,4 +228,5 @@ void loop() {
   }
   lastButtonReading = reading;
 }
+
 
